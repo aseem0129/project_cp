@@ -393,6 +393,11 @@ extension ARBodyScannerViewModel: ARSessionDelegate {
         let vertices = geometry.vertices
         let faces = geometry.faces
         
+        // Validate geometry data
+        guard vertices.count > 0 && faces.count > 0 else {
+            return
+        }
+        
         // Convert to our mesh data format
         let vertexCount = vertices.count
         let faceCount = faces.count
@@ -400,18 +405,42 @@ extension ARBodyScannerViewModel: ARSessionDelegate {
         var meshVertices: [SIMD3<Float>] = []
         var meshFaces: [UInt32] = []
         
-        // Extract vertices
-        let vertexBuffer = vertices.buffer.contents().bindMemory(to: SIMD3<Float>.self, capacity: Int(vertexCount))
+        // Extract vertices with proper stride handling
+        let vertexStride = vertices.stride
+        let vertexBuffer = vertices.buffer.contents()
+        
         for i in 0..<Int(vertexCount) {
-            let vertex = vertexBuffer[i]
+            let vertexPointer = vertexBuffer.advanced(by: i * vertexStride).bindMemory(to: SIMD3<Float>.self, capacity: 1)
+            let vertex = vertexPointer.pointee
             let worldPosition = meshAnchor.transform * SIMD4<Float>(vertex.x, vertex.y, vertex.z, 1.0)
             meshVertices.append(SIMD3<Float>(worldPosition.x, worldPosition.y, worldPosition.z))
         }
         
-        // Extract faces
-        let faceBuffer = faces.buffer.contents().bindMemory(to: UInt32.self, capacity: Int(faceCount) * 3)
-        for i in 0..<Int(faceCount) * 3 {
-            meshFaces.append(faceBuffer[i])
+        // Extract faces with proper format handling
+        let faceBuffer = faces.buffer.contents()
+        let bytesPerIndex = faces.bytesPerIndex
+        
+        for i in 0..<Int(faceCount) {
+            let facePointer = faceBuffer.advanced(by: i * 3 * bytesPerIndex)
+            
+            if bytesPerIndex == 2 {
+                // 16-bit indices
+                let indices = facePointer.bindMemory(to: UInt16.self, capacity: 3)
+                meshFaces.append(UInt32(indices[0]))
+                meshFaces.append(UInt32(indices[1]))
+                meshFaces.append(UInt32(indices[2]))
+            } else if bytesPerIndex == 4 {
+                // 32-bit indices
+                let indices = facePointer.bindMemory(to: UInt32.self, capacity: 3)
+                meshFaces.append(indices[0])
+                meshFaces.append(indices[1])
+                meshFaces.append(indices[2])
+            }
+        }
+        
+        // Only store if we have valid data
+        guard !meshVertices.isEmpty && !meshFaces.isEmpty else {
+            return
         }
         
         let meshData = MeshData(vertices: meshVertices, faces: meshFaces)
