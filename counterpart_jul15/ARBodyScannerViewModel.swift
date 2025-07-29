@@ -26,7 +26,7 @@ class ARBodyScannerViewModel: NSObject, ObservableObject {
     private var capturedMeshes: [MeshData] = []
     private var scanTimer: Timer?
     private var phaseTimer: Timer?
-    private var totalScanTime: TimeInterval = 60.0 // 60 seconds total scan time
+    private var totalScanTime: TimeInterval = 10.0 // 10 seconds total scan time for testing
     private var currentScanTime: TimeInterval = 0.0
     
     // Mesh processing
@@ -70,11 +70,19 @@ class ARBodyScannerViewModel: NSObject, ObservableObject {
             configuration.frameSemantics.insert(.personSegmentationWithDepth)
         }
         
+        // Enable camera passthrough
+        arView.environment.background = .cameraFeed()
+        arView.renderOptions.insert(.disablePersonOcclusion)
+        arView.renderOptions.insert(.disableDepthOfField)
+        arView.renderOptions.insert(.disableMotionBlur)
+        
         arView.session.delegate = self
-        arView.session.run(configuration)
+        arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         
         // Setup scene
         setupScene()
+        
+        print("ARView configured with camera feed enabled")
     }
     
     private func setupScene() {
@@ -100,6 +108,8 @@ class ARBodyScannerViewModel: NSObject, ObservableObject {
         isScanning = true
         currentScanTime = 0.0
         scanProgress = 0.0
+        
+        print("🚀 Starting body scan...")
         
         // Start the scanning phases
         advanceToNextPhase()
@@ -151,15 +161,15 @@ class ARBodyScannerViewModel: NSObject, ObservableObject {
         switch currentPhase {
         case .preparation:
             currentPhase = .frontScan
-            schedulePhaseTransition(duration: 20.0) // 20 seconds for front scan
+            schedulePhaseTransition(duration: 5.0) // 5 seconds for front scan
             
         case .frontScan:
             currentPhase = .sideScan
-            schedulePhaseTransition(duration: 20.0) // 20 seconds for side scan
+            schedulePhaseTransition(duration: 5.0) // 5 seconds for side scan
             
         case .sideScan:
             currentPhase = .backScan
-            schedulePhaseTransition(duration: 20.0) // 20 seconds for back scan
+            schedulePhaseTransition(duration: 5.0) // 5 seconds for back scan
             
         case .backScan:
             currentPhase = .processing
@@ -398,6 +408,9 @@ extension ARBodyScannerViewModel: ARSessionDelegate {
             return
         }
         
+        // Add visual mesh to AR scene
+        addMeshVisualization(meshAnchor)
+        
         // Convert to our mesh data format
         let vertexCount = vertices.count
         let faceCount = faces.count
@@ -445,11 +458,42 @@ extension ARBodyScannerViewModel: ARSessionDelegate {
         
         let meshData = MeshData(vertices: meshVertices, faces: meshFaces)
         
+        print("📊 Captured mesh: \(meshVertices.count) vertices, \(meshFaces.count/3) faces")
+        
         // Store or update mesh data
         if let existingIndex = capturedMeshes.firstIndex(where: { $0.id == meshAnchor.identifier }) {
             capturedMeshes[existingIndex] = meshData
+            print("🔄 Updated existing mesh anchor")
         } else {
             capturedMeshes.append(meshData)
+            print("✅ Added new mesh anchor (total: \(capturedMeshes.count))")
+        }
+    }
+    
+    private func addMeshVisualization(_ meshAnchor: ARMeshAnchor) {
+        guard let arView = arView else { return }
+        
+        // Create a simple wireframe visualization
+        let meshEntity = ModelEntity()
+        
+        // Create mesh resource from ARMeshAnchor
+        do {
+            let meshResource = try MeshResource.generate(from: meshAnchor)
+            var material = SimpleMaterial()
+            material.color = .init(tint: .green.withAlphaComponent(0.3))
+            material.isMetallic = false
+            material.roughness = 1.0
+            
+            meshEntity.model = ModelComponent(mesh: meshResource, materials: [material])
+            meshEntity.transform = Transform(matrix: meshAnchor.transform)
+            
+            // Add to scene
+            let anchor = AnchorEntity(anchor: meshAnchor)
+            anchor.addChild(meshEntity)
+            arView.scene.addAnchor(anchor)
+            
+        } catch {
+            print("Failed to create mesh visualization: \(error)")
         }
     }
 }
